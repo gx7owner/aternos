@@ -1,69 +1,78 @@
 const puppeteer = require('puppeteer');
 
-const email = 'YOUR_EMAIL';
-const password = 'YOUR_PASSWORD';
+const USERNAME = 'hxrshadow'; // <<-- Replace with your Aternos username
+const PASSWORD = 'hxrshadow'; // <<-- Replace with your Aternos password
 
 (async () => {
-  const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage();
-
-  // 1. Go to login page
-  await page.goto('https://aternos.org/go/');
-  await page.waitForSelector('#login');
-
-  // 2. Log in
-  await page.type('#user', email);
-  await page.type('#password', password);
-  await page.click('#login');
-
-  await page.waitForNavigation();
-
-  // 3. Go to server page
-  await page.goto('https://aternos.org/server/');
-
-  // 4. Start the server if it's offline
-  await page.waitForSelector('#start');
-
-  const isOnline = await page.evaluate(() => {
-    return document.querySelector('#statuslabel').textContent.includes("Online");
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
   });
 
-  if (!isOnline) {
-    console.log('Starting server...');
+  const page = await browser.newPage();
+
+  console.log("Logging in...");
+  await page.goto('https://aternos.org/go/', { waitUntil: 'networkidle2' });
+
+  await page.waitForSelector('#user');
+  await page.type('#user', USERNAME);
+  await page.type('#password', PASSWORD);
+  await page.click('#login');
+
+  await page.waitForNavigation({ waitUntil: 'networkidle2' });
+
+  console.log("Logged in, navigating to server page...");
+  await page.goto('https://aternos.org/server/', { waitUntil: 'networkidle2' });
+
+  // Wait for page to load status
+  await page.waitForSelector('#start');
+
+  const statusText = await page.evaluate(() => {
+    return document.querySelector('#statuslabel')?.innerText || '';
+  });
+
+  if (statusText.includes("Offline")) {
+    console.log("Server is offline. Starting it...");
     await page.click('#start');
   } else {
-    console.log('Server is already online.');
+    console.log("Server is already online or starting...");
   }
 
-  // 5. Keep monitoring for countdown
-  while (true) {
-    await page.waitForTimeout(10000); // check every 10 seconds
+  // Monitoring loop
+  console.log("Monitoring server for countdown...");
 
-    const countdown = await page.evaluate(() => {
-      const text = document.querySelector('#statuslabel')?.textContent || '';
-      const match = text.match(/(\d+):(\d+)/); // mm:ss
+  while (true) {
+    await page.waitForTimeout(15000); // 15 seconds
+
+    const countdownSeconds = await page.evaluate(() => {
+      const label = document.querySelector('#statuslabel');
+      if (!label) return null;
+
+      const match = label.textContent.match(/(\d+):(\d+)/); // mm:ss
       if (match) {
-        return parseInt(match[1]) * 60 + parseInt(match[2]); // total seconds
+        return parseInt(match[1]) * 60 + parseInt(match[2]);
       }
+
       return null;
     });
 
-    if (countdown !== null) {
-      console.log(`Server countdown: ${countdown} seconds`);
-    }
+    if (countdownSeconds !== null) {
+      console.log(`Countdown: ${countdownSeconds} seconds`);
 
-    if (countdown !== null && countdown <= 60) {
-      const extendButtonExists = await page.evaluate(() => {
-        const btn = document.querySelector('.extend-button');
-        return btn !== null;
-      });
+      if (countdownSeconds <= 60) {
+        const extended = await page.evaluate(() => {
+          const button = document.querySelector('.extend-button');
+          if (button) {
+            button.click();
+            return true;
+          }
+          return false;
+        });
 
-      if (extendButtonExists) {
-        console.log("Extending server by 1 minute...");
-        await page.click('.extend-button');
+        if (extended) {
+          console.log("Extended server time by 1 minute.");
+        }
       }
     }
   }
-
-  // Never closes, keeps watching
 })();
